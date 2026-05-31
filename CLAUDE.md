@@ -75,13 +75,51 @@ This document contains critical information about working with this codebase. Fo
 
 ## System Architecture
 
-[fill in here]
+arr-mcp is an MCP server that provides natural language management of a home media server stack (Plex, Sonarr, Radarr, SABnzbd, etc.) via Podman or Docker.
+
+### Deployment model
+
+arr-mcp runs as a container alongside the media stack. It communicates with the container runtime via a bind-mounted Unix socket (`/run/user/1000/podman/podman.sock` for rootless Podman, `/var/run/docker.sock` for Docker). The host mounts `/opt/stacks` and `/media-server` into the container to allow filesystem and compose file access.
+
+```
+Claude (MCP client)
+      │  HTTP + Bearer auth
+      ▼
+ arr-mcp container
+      │  Unix socket
+      ▼
+ Podman/Docker runtime
+      │
+      ▼
+ Media stack containers (plex, sonarr, radarr, ...)
+```
+
+### Planned: host-side helper agent (see issues #12, #13)
+
+The current architecture cannot run `podman-compose` or `systemctl` commands because those binaries are not available inside the container. The planned solution is a small host-side helper process running as the media user (UID 1000), exposed to arr-mcp over a dedicated Unix socket. This will enable:
+
+- Full stack lifecycle management via `podman-compose`
+- Quadlet/systemd service management (`systemctl --user`)
+- Reloading changed compose files without host access
+
+### Target environment
+
+- **OS**: Debian/Ubuntu
+- **Runtime**: Rootless Podman under a dedicated `media` service account (UID 1000)
+- **Socket**: `/run/user/1000/podman/podman.sock`
+- **Stacks**: `/opt/stacks/<stack-name>/compose.yaml`
+- **Media**: `/media-server/`
 
 ## Core Components
 
-- `config.py`: Configuration management
-- `daemon.py`: Main daemon
-[etc... fill in here]
+- `src/arr_mcp/server.py`: Starlette ASGI app, API key auth middleware, entry point
+- `src/arr_mcp/config.py`: Pydantic settings loaded from environment / `.env`
+- `src/arr_mcp/runtime/detector.py`: Auto-detects Podman or Docker socket at startup
+- `src/arr_mcp/runtime/client.py`: Async HTTP client over the container runtime socket
+- `src/arr_mcp/tools/containers.py`: Container lifecycle tools (list, start, stop, restart, remove, logs, stats)
+- `src/arr_mcp/tools/stacks.py`: Stack management tools (up, down, pull, restart, compose read/write/validate)
+- `src/arr_mcp/tools/filesystem.py`: Filesystem tools scoped to allowed paths (disk usage, directory list, read, write)
+- `src/arr_mcp/tools/logs.py`: Log reading and searching tools
 
 ## Pull Requests
 
